@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">啾啾</string>
+    <string name="nav_message">消息</string>
+    <string name="nav_sensor">传感器</string>
+    <string name="nav_phrase">鼓励语</string>
+    <string name="nav_settings">设置</string>
+</resources>

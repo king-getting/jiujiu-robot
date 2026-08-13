@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+    <item
+        android:id="@+id/nav_message"
+        android:title="@string/nav_message" />
+    <item
+        android:id="@+id/nav_sensor"
+        android:title="@string/nav_sensor" />
+    <item
+        android:id="@+id/nav_phrase"
+        android:title="@string/nav_phrase" />
+    <item
+        android:id="@+id/nav_settings"
+        android:title="@string/nav_settings" />
+</menu>
