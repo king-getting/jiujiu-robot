@@ -62,12 +62,14 @@ class BleProvisioner(private val context: Context) {
             var gatt: BluetoothGatt? = null
             var resumed = false
 
+            var scanCallback: ScanCallback? = null
+
             fun finish(result: Result) {
                 if (resumed) return
                 resumed = true
                 gatt?.disconnect()
                 gatt?.close()
-                adapter?.bluetoothLeScanner?.stopScan(scanCallback)
+                scanCallback?.let { adapter?.bluetoothLeScanner?.stopScan(it) }
                 cont.resume(result)
             }
 
@@ -158,7 +160,7 @@ class BleProvisioner(private val context: Context) {
                 }
             }
 
-            val scanCallback = object : ScanCallback() {
+            scanCallback = object : ScanCallback() {
                 override fun onScanResult(callbackType: Int, result: ScanResult) {
                     adapter?.bluetoothLeScanner?.stopScan(this)
                     result.device.connectGatt(context, false, gattCallback)
@@ -171,7 +173,7 @@ class BleProvisioner(private val context: Context) {
 
             cont.invokeOnCancellation {
                 gatt?.disconnect(); gatt?.close()
-                adapter?.bluetoothLeScanner?.stopScan(scanCallback)
+                scanCallback?.let { adapter?.bluetoothLeScanner?.stopScan(it) }
             }
 
             val filter = ScanFilter.Builder()
