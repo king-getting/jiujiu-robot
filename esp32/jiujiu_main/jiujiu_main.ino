@@ -5,8 +5,34 @@
 #include <TFT_eSPI.h>
 #include <WiFi.h>
 #include <WebServer.h>
+#include <DHT.h>
+#include <BLEDevice.h>
+#include <BLEServer.h>
+#include <BLEUtils.h>
+#include <BLE2902.h>
 
 TFT_eSPI tft = TFT_eSPI();
+
+// ---------- 传感器 (DHT11 + MQ-135) ----------
+// DHT11: DATA->GPIO26, VCC->GPIO27(电源可控); MQ-135: AO->GPIO34(需分压, 见交接文档)
+#define DHT_POWER_PIN 27
+#define DHT_DATA_PIN  26
+#define MQ135_AO_PIN  34
+DHT dht(DHT_DATA_PIN, DHT11);
+float lastTemp = 0, lastHumi = 0;
+int   lastAir = 0;
+bool  dhtOk = false;
+unsigned long lastSensorReadAt = 0;
+
+void readSensors() {
+  unsigned long now = millis();
+  if (now - lastSensorReadAt < 2000) return;   // DHT11 最多每秒读一次
+  lastSensorReadAt = now;
+  float t = dht.readTemperature();
+  float h = dht.readHumidity();
+  if (!isnan(t) && !isnan(h)) { lastTemp = t; lastHumi = h; dhtOk = true; }
+  lastAir = analogRead(MQ135_AO_PIN);          // MQ-135 原始 ADC 值
+}
 
 // ---------- 配置: 手机热点(改成你的) ----------
 const char* WIFI_SSID = "Jiujiu-Hotspot";
@@ -160,7 +186,10 @@ void handleRoot() {
 
 void handleMessage() {
   String body = server.arg("plain");
-  Serial.println("[http] POST /api/message body=" + body);
+  Serial.println("[http] POST args=" + String(server.args()) + " bodyLen=" + String(body.length()));
+  for (int a = 0; a < server.args(); a++) {
+    Serial.println("[http] arg" + String(a) + " key=" + server.argName(a) + " val=" + server.arg(a).substring(0, 60));
+  }
   String cmd = jsonStr(body, "cmd");
   if (cmd == "msg" || cmd == "message") {
     currentMsg = sanitizeAscii(jsonStr(body, "text"));
@@ -181,7 +210,10 @@ void handleStatus() {
 }
 
 void handleSensor() {
-  server.send(200, "application/json", "{\"ver\":1,\"temp\":0,\"humi\":0,\"air\":0}");
+  readSensors();
+  char buf[96];
+  snprintf(buf, sizeof(buf), "{\"ver\":1,\"temp\":%.1f,\"humi\":%.1f,\"air\":%d}", lastTemp, lastHumi, lastAir);
+  server.send(200, "application/json", buf);
 }
 
 void handlePhraseAdd() {
@@ -202,6 +234,71 @@ void handlePhraseList() {
   server.send(200, "application/json", json);
 }
 
+// ---------- BLE (与APP硬编码UUID一致, 见 app/README.md) ----------
+#define BLE_SERVICE_UUID     "6a696f00-0000-1000-8000-00805f9b34fb"
+#define BLE_CHAR_WRITE_UUID  "6a696f01-0000-1000-8000-00805f9b34fb"
+#define BLE_CHAR_NOTIFY_UUID "6a696f02-0000-1000-8000-00805f9b34fb"
+
+BLECharacteristic* bleNotifyChar = nullptr;
+String bleIncoming = "";
+volatile bool bleMsgReady = false;
+
+void bleReply(const char* json) {
+  if (bleNotifyChar) {
+    bleNotifyChar->setValue((uint8_t*)json, strlen(json));
+    bleNotifyChar->notify();
+  }
+}
+
+class JiuJiuBleWrite : public BLECharacteristicCallbacks {
+  void onWrite(BLECharacteristic* c) override {
+    String body = String(c->getValue().c_str());
+    Serial.println("[ble] recv: " + body);
+    String cmd = jsonStr(body, "cmd");
+    if (cmd == "msg" || cmd == "message") {
+      bleIncoming = sanitizeAscii(jsonStr(body, "text"));
+      if (bleIncoming.length() == 0) bleIncoming = "(empty)";
+      bleMsgReady = true;   // 主循环绘制, 避免与TFT SPI冲突
+      bleReply("{\"ok\":true}");
+    } else if (cmd == "wifi") {
+      bleReply("{\"ok\":false,\"err\":\"半成品未支持配网, 请连AP模式 Jiujiu/12345678\"}");
+    } else {
+      bleReply("{\"ok\":false,\"err\":\"bad cmd\"}");
+    }
+  }
+};
+
+class JiuJiuBleServer : public BLEServerCallbacks {
+  void onConnect(BLEServer*) override {
+    Serial.println("[ble] connected");
+  }
+  void onDisconnect(BLEServer*) override {
+    Serial.println("[ble] disconnected, re-advertising");
+    BLEDevice::startAdvertising();
+  }
+};
+
+void setupBLE() {
+  BLEDevice::init("JIUJIU");
+  BLEServer* server = BLEDevice::createServer();
+  server->setCallbacks(new JiuJiuBleServer());
+  BLEService* service = server->createService(BLE_SERVICE_UUID);
+  BLECharacteristic* writeChar = service->createCharacteristic(
+    BLE_CHAR_WRITE_UUID,
+    BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR);
+  writeChar->setCallbacks(new JiuJiuBleWrite());
+  bleNotifyChar = service->createCharacteristic(
+    BLE_CHAR_NOTIFY_UUID,
+    BLECharacteristic::PROPERTY_NOTIFY | BLECharacteristic::PROPERTY_READ);
+  bleNotifyChar->addDescriptor(new BLE2902());
+  service->start();
+
+  BLEAdvertising* adv = BLEDevice::getAdvertising();
+  adv->addServiceUUID(BLE_SERVICE_UUID);
+  adv->setScanResponse(true);
+  BLEDevice::startAdvertising();
+  Serial.println("[ble] server started (JIUJIU)");
+}
 // ---------- WiFi ----------
 void setupWiFi() {
   Serial.println("[WiFi] scanning...");
@@ -233,6 +330,10 @@ void setupWiFi() {
 // ---------- 主流程 ----------
 void setup() {
   Serial.begin(115200);
+  pinMode(DHT_POWER_PIN, OUTPUT);
+  digitalWrite(DHT_POWER_PIN, HIGH);   // DHT11 上电
+  delay(500);
+  dht.begin();
   tft.init();
   tft.setRotation(1);
   pinMode(25, OUTPUT);
@@ -253,10 +354,20 @@ void setup() {
   server.on("/api/phrase/del", HTTP_POST, handlePhraseDel);
   server.begin();
   Serial.println("[HTTP] server started");
+  setupBLE();
 }
 
 void loop() {
   server.handleClient();
+
+  // BLE 消息上屏(主循环绘制, 避免与TFT SPI冲突)
+  if (bleMsgReady) {
+    bleMsgReady = false;
+    currentMsg = bleIncoming;
+    msgShownUntil = millis() + 10000;
+    drawMessage(currentMsg);
+  }
+
   unsigned long now = millis();
 
   // 消息显示中 -> 不画表情
@@ -281,6 +392,11 @@ void loop() {
     drawPhrase(phrases[phraseIdx]);
   }
 }
+
+
+
+
+
 
 
 
