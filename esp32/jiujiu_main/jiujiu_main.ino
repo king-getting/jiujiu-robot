@@ -10,8 +10,17 @@
 #include <BLEServer.h>
 #include <BLEUtils.h>
 #include <BLE2902.h>
+#include "chinese_phrases.h"
 
 TFT_eSPI tft = TFT_eSPI();
+
+const char* zh_phrase_texts[] = {
+  "我在呢",
+  "加油鸭",
+  "早点休息",
+  "今天也要开心",
+  "晚安"
+};
 
 // ---------- 传感器 (DHT11 + MQ-135) ----------
 // DHT11: DATA->GPIO26, VCC->GPIO27(电源可控); MQ-135: AO->GPIO34(需分压, 见交接文档)
@@ -32,6 +41,7 @@ void readSensors() {
   float h = dht.readHumidity();
   if (!isnan(t) && !isnan(h)) { lastTemp = t; lastHumi = h; dhtOk = true; }
   lastAir = analogRead(MQ135_AO_PIN);          // MQ-135 原始 ADC 值
+  Serial.printf("[sensor] temp=%.1f humi=%.1f air=%d ok=%d\n", lastTemp, lastHumi, lastAir, dhtOk ? 1 : 0);
 }
 
 // ---------- 配置: 手机热点(改成你的) ----------
@@ -67,16 +77,6 @@ int phraseIdx = 0;
 unsigned long lastPhraseAt = 0;
 String myIP = "";
 
-const char* phrases[] = {
-  "Keep going, you are amazing!",
-  "Love you to the moon and back",
-  "Smile, someone loves you <3",
-  "Today is a good day!",
-  "You can do it!",
-  "Jiujiu is watching over you"
-};
-#define PHRASE_N (sizeof(phrases)/sizeof(phrases[0]))
-
 // ---------- 简单 JSON 取值 (无 ArduinoJson) ----------
 String jsonStr(const String& body, const char* key) {
   String k = String("\"") + key + "\"";
@@ -109,43 +109,42 @@ void drawWelcome() {
   tft.fillScreen(BG_PINK);
   tft.setTextColor(TFT_WHITE, BG_PINK);
   tft.setTextDatum(MC_DATUM);
-  tft.drawString("JIUIU", 160, 60, 6);
+  tft.drawString("JIUJIU", 160, 60, 6);
   tft.setTextColor(BG_DEEP, BG_PINK);
-  tft.drawString("hello my love", 160, 110, 2);
-  drawHeart(160, 165, 40, BG_DEEP);
+  tft.drawString("hello my friend", 160, 110, 2);
+  drawFace(false);
+  drawZhPhrase(0);
   tft.setTextColor(TFT_DARKGREY, BG_PINK);
-  tft.drawString("connecting...", 160, 215, 2);
+  tft.drawString("connecting...", 160, 228, 2);
 }
 
 void drawFace(bool blink) {
   tft.fillScreen(BG_PINK);
+  tft.fillTriangle(74, 92, 94, 34, 132, 76, BG_DEEP);   // 左耳
+  tft.fillTriangle(246, 92, 226, 34, 188, 76, BG_DEEP); // 右耳
   tft.fillCircle(160, 100, 72, SKIN);            // 脸
   if (blink) {
-    tft.fillRect(125, 80, 20, 5, TFT_BLACK);     // 闭眼
-    tft.fillRect(175, 80, 20, 5, TFT_BLACK);
+    tft.fillRect(124, 80, 22, 5, TFT_BLACK);     // 闭眼
+    tft.fillRect(174, 80, 22, 5, TFT_BLACK);
   } else {
-    tft.fillCircle(135, 82, 9, TFT_BLACK);       // 眼睛
-    tft.fillCircle(185, 82, 9, TFT_BLACK);
-    tft.fillCircle(138, 79, 3, TFT_WHITE);       // 高光
-    tft.fillCircle(188, 79, 3, TFT_WHITE);
+    tft.fillCircle(134, 82, 9, TFT_BLACK);       // 眼睛
+    tft.fillCircle(186, 82, 9, TFT_BLACK);
+    tft.fillCircle(137, 79, 3, TFT_WHITE);       // 高光
+    tft.fillCircle(189, 79, 3, TFT_WHITE);
   }
-  tft.fillCircle(118, 112, 12, BLUSH);           // 腮红
-  tft.fillCircle(202, 112, 12, BLUSH);
-  tft.fillCircle(160, 118, 9, TFT_RED);          // 嘴
-  tft.setTextColor(BG_DEEP, BG_PINK);
-  tft.setTextDatum(BC_DATUM);
-  tft.drawString("Jiujiu is here", 160, 230, 2);
+  tft.fillCircle(116, 112, 12, BLUSH);           // 腮红
+  tft.fillCircle(204, 112, 12, BLUSH);
+  tft.fillCircle(160, 118, 8, TFT_BLACK);        // 鼻子
+  tft.fillCircle(160, 130, 3, TFT_WHITE);        // 鼻子高光
+  tft.drawArc(160, 126, 14, 10, 30, 150, TFT_BLACK, BG_PINK);
+  tft.drawLine(160, 128, 160, 133, TFT_BLACK);
 }
 
-void drawPhrase(const String& p) {
-  tft.fillRect(0, 190, 320, 30, BG_PINK);
-  tft.setTextColor(TFT_DARKGREY, BG_PINK);
-  tft.setTextDatum(MC_DATUM);
-  if (tft.textWidth(p, 2) > 310) {
-    tft.drawString(p.substring(0, 28), 160, 205, 2);
-  } else {
-    tft.drawString(p, 160, 205, 2);
-  }
+void drawZhPhrase(int idx) {
+  const ZhPhrase& p = zh_phrases[idx % ZH_PHRASE_COUNT];
+  int x = (320 - p.w) / 2;
+  int y = 196;
+  tft.drawBitmap(x, y, p.data, p.w, 24, BG_DEEP, BG_PINK);
 }
 
 void drawMessage(const String& text) {
@@ -226,9 +225,9 @@ void handlePhraseDel() {
 
 void handlePhraseList() {
   String json = "{\"ver\":1,\"list\":[";
-  for (int i = 0; i < (int)PHRASE_N; i++) {
+  for (int i = 0; i < (int)ZH_PHRASE_COUNT; i++) {
     if (i) json += ",";
-    json += "\"" + String(phrases[i]) + "\"";
+    json += "\"" + String(zh_phrase_texts[i]) + "\"";
   }
   json += "]}";
   server.send(200, "application/json", json);
@@ -359,6 +358,7 @@ void setup() {
 
 void loop() {
   server.handleClient();
+  readSensors();
 
   // BLE 消息上屏(主循环绘制, 避免与TFT SPI冲突)
   if (bleMsgReady) {
@@ -379,17 +379,17 @@ void loop() {
     blinking = false;
     lastBlinkAt = now;
     drawFace(false);
-    drawPhrase(phrases[phraseIdx]);
+    drawZhPhrase(phraseIdx);
   } else if (blinking) {
     drawFace(true);
-    drawPhrase(phrases[phraseIdx]);
+    drawZhPhrase(phraseIdx);
   }
 
   // 鼓励语轮换(每12秒)
   if (now - lastPhraseAt > 12000) {
     lastPhraseAt = now;
-    phraseIdx = (phraseIdx + 1) % PHRASE_N;
-    drawPhrase(phrases[phraseIdx]);
+    phraseIdx = (phraseIdx + 1) % ZH_PHRASE_COUNT;
+    drawZhPhrase(phraseIdx);
   }
 }
 

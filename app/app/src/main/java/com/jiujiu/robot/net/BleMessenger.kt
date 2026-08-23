@@ -8,12 +8,10 @@ import android.bluetooth.BluetoothGattDescriptor
 import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothProfile
 import android.bluetooth.le.ScanCallback
-import android.bluetooth.le.ScanFilter
 import android.bluetooth.le.ScanResult
 import android.bluetooth.le.ScanSettings
 import android.content.Context
 import android.os.Build
-import android.os.ParcelUuid
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeout
@@ -156,6 +154,7 @@ class BleMessenger(private val appContext: Context) {
         cont.invokeOnCancellation { cleanupAfterCancel() }
         val callback = object : ScanCallback() {
             override fun onScanResult(callbackType: Int, result: ScanResult) {
+                if (scanResultName(result) != DEVICE_NAME) return
                 adapter?.bluetoothLeScanner?.stopScan(this)
                 gatt = result.device.connectGatt(appContext, false, gattCallback)
             }
@@ -168,16 +167,31 @@ class BleMessenger(private val appContext: Context) {
             }
         }
         scanCallback = callback
-        val filter = ScanFilter.Builder()
-            .setServiceUuid(ParcelUuid(SERVICE_UUID))
-            .build()
         val settings = ScanSettings.Builder()
             .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
             .build()
-        if (adapter?.bluetoothLeScanner?.startScan(listOf(filter), settings, callback) == null) {
+        if (adapter?.bluetoothLeScanner?.startScan(null, settings, callback) == null) {
             connectWaiter = null
             cont.resume(Result.Failure("本机蓝牙不可用，请先打开蓝牙"))
         }
+    }
+
+    private fun scanResultName(result: ScanResult): String? {
+        result.scanRecord?.deviceName?.let { return it }
+        runCatching { result.device.name }.getOrNull()?.let { return it }
+        val bytes = result.scanRecord?.bytes ?: return null
+        var i = 0
+        while (i + 1 < bytes.size) {
+            val len = bytes[i].toInt() and 0xFF
+            if (len == 0) break
+            val type = bytes[i + 1].toInt() and 0xFF
+            if (type == 0x08 || type == 0x09) {
+                val end = minOf(i + 1 + len, bytes.size)
+                return String(bytes.copyOfRange(i + 2, end), Charsets.UTF_8)
+            }
+            i += 1 + len
+        }
+        return null
     }
 
     private suspend fun doSend(text: String): Result = suspendCancellableCoroutine { cont ->

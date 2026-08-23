@@ -7,4 +7,5 @@
     <color name="text_main">#4A3038</color>
     <color name="text_sub">#9B7B85</color>
     <color name="white">#FFFFFF</color>
+    <color name="bottom_nav_unselected">#A78A92</color>
 </resources>
