@@ -17,9 +17,10 @@
 
 TFT_eSPI tft = TFT_eSPI();
 #define USE_SD_IMAGE 0  // 0=内置狗头(稳定/快), 1=从SD读图(需按独立SPI接线)
+#define ENABLE_SD_LOG 1  // 1=传感器历史记录写入 /sensor.csv
 SPIClass SDSPI(HSPI);
 #define SD_SCK  14
-#define SD_MISO 12
+#define SD_MISO 22
 #define SD_MOSI 13
 #define SD_CS   33
 bool sdOk = false;
@@ -42,6 +43,9 @@ float lastTemp = 0, lastHumi = 0;
 int   lastAir = 0;
 bool  dhtOk = false;
 unsigned long lastSensorReadAt = 0;
+unsigned long lastSensorLogAt = 0;
+
+void appendSensorLog();
 
 void readSensors() {
   unsigned long now = millis();
@@ -52,6 +56,24 @@ void readSensors() {
   if (!isnan(t) && !isnan(h)) { lastTemp = t; lastHumi = h; dhtOk = true; }
   lastAir = analogRead(MQ135_AO_PIN);          // MQ-135 原始 ADC 值
   Serial.printf("[sensor] temp=%.1f humi=%.1f air=%d ok=%d\n", lastTemp, lastHumi, lastAir, dhtOk ? 1 : 0);
+  appendSensorLog();
+}
+
+void appendSensorLog() {
+#if ENABLE_SD_LOG
+  if (!sdOk) return;
+  if (millis() - lastSensorLogAt < 60000) return;   // 每分钟记一条
+  lastSensorLogAt = millis();
+  File f = SD.open("/sensor.csv", FILE_APPEND);
+  if (!f) {
+    f = SD.open("/sensor.csv", FILE_WRITE);
+    if (!f) { Serial.println("[SD] open sensor.csv fail"); return; }
+    f.println("timestamp_ms,temp,humi,air,dht_ok");
+  }
+  f.printf("%lu,%.1f,%.1f,%d,%d\n", (unsigned long)millis(), lastTemp, lastHumi, lastAir, dhtOk ? 1 : 0);
+  f.close();
+  Serial.println("[SD] sensor log appended");
+#endif
 }
 
 // ---------- 配置: 手机热点(改成你的) ----------
@@ -228,7 +250,7 @@ void handleMessage() {
 void handleStatus() {
   bool wifi = WiFi.status() == WL_CONNECTED;
   String json = "{\"ver\":1,\"ip\":\"" + myIP + "\",\"wifi\":" + (wifi ? "true" : "false") +
-                ",\"sd\":false,\"battery\":0}";
+                ",\"sd\":" + String(sdOk ? "true" : "false") + ",\"battery\":0}";
   server.send(200, "application/json", json);
 }
 
@@ -351,12 +373,12 @@ void setup() {
   digitalWrite(DHT_POWER_PIN, HIGH);   // DHT11 上电
   delay(500);
   dht.begin();
-#if USE_SD_IMAGE
+#if USE_SD_IMAGE || ENABLE_SD_LOG
   pinMode(SD_CS, OUTPUT);
   digitalWrite(SD_CS, HIGH);
-  SPI.begin(18, 19, 23, SD_CS);
-  sdOk = SD.begin(SD_CS, SPI, 400000);
-  Serial.printf("[SD] %s\n", sdOk ? "ok" : "fail");
+  SDSPI.begin(SD_SCK, SD_MISO, SD_MOSI, SD_CS);
+  sdOk = SD.begin(SD_CS, SDSPI, 400000);
+  Serial.printf("[SD] %s (HSPI 14/22/13/33)\n", sdOk ? "ok" : "fail");
 #else
   Serial.println("[SD] disabled: using built-in gougou image");
 #endif
