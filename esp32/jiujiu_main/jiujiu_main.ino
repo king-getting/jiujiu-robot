@@ -24,14 +24,8 @@ SPIClass SDSPI(HSPI);
 #define SD_MOSI 13
 #define SD_CS   33
 bool sdOk = false;
-
-const char* zh_phrase_texts[] = {
-  "我在呢",
-  "加油鸭",
-  "早点休息",
-  "今天也要开心",
-  "晚安"
-};
+String phraseTexts[ZH_PHRASE_COUNT];
+int phraseCount = ZH_PHRASE_COUNT;
 
 // ---------- 传感器 (DHT11 + MQ-135) ----------
 // DHT11: DATA->GPIO26, VCC->GPIO27(电源可控); MQ-135: AO->GPIO34(需分压, 见交接文档)
@@ -46,6 +40,7 @@ unsigned long lastSensorReadAt = 0;
 unsigned long lastSensorLogAt = 0;
 
 void appendSensorLog();
+void initPhrases();
 
 void readSensors() {
   unsigned long now = millis();
@@ -74,6 +69,30 @@ void appendSensorLog() {
   f.close();
   Serial.println("[SD] sensor log appended");
 #endif
+}
+
+void initPhrases() {
+  phraseCount = 0;
+  if (sdOk) {
+    File f = SD.open("/phrases.txt");
+    if (f) {
+      while (f.available() && phraseCount < ZH_PHRASE_COUNT) {
+        String line = f.readStringUntil('\n');
+        line.trim();
+        if (line.length() > 0 && line.length() <= 48) {
+          phraseTexts[phraseCount++] = line;
+        }
+      }
+      f.close();
+      if (phraseCount > 0) {
+        Serial.printf("[SD] loaded %d phrases from /phrases.txt\n", phraseCount);
+        return;
+      }
+    }
+  }
+  for (int i = 0; i < ZH_PHRASE_COUNT; i++) phraseTexts[i] = String(zh_phrases[i].text);
+  phraseCount = ZH_PHRASE_COUNT;
+  Serial.printf("[phrase] using %d built-in phrases\n", phraseCount);
 }
 
 // ---------- 配置: 手机热点(改成你的) ----------
@@ -186,10 +205,15 @@ void drawFace(bool blink) {
 }
 
 void drawZhPhrase(int idx) {
-  const ZhPhrase& p = zh_phrases[idx % ZH_PHRASE_COUNT];
-  int x = (320 - p.w) / 2;
+  int n = phraseCount > 0 ? phraseCount : ZH_PHRASE_COUNT;
+  const ZhPhrase* p = &zh_phrases[0];
+  String target = phraseTexts[idx % n];
+  for (int i = 0; i < ZH_PHRASE_COUNT; i++) {
+    if (target == String(zh_phrases[i].text)) { p = &zh_phrases[i]; break; }
+  }
+  int x = (320 - p->w) / 2;
   int y = 196;
-  tft.drawBitmap(x, y, p.data, p.w, 24, BG_DEEP, BG_PINK);
+  tft.drawBitmap(x, y, p->data, p->w, 24, BG_DEEP, BG_PINK);
 }
 
 void drawMessage(const String& text) {
@@ -271,9 +295,9 @@ void handlePhraseDel() {
 
 void handlePhraseList() {
   String json = "{\"ver\":1,\"list\":[";
-  for (int i = 0; i < (int)ZH_PHRASE_COUNT; i++) {
+  for (int i = 0; i < phraseCount; i++) {
     if (i) json += ",";
-    json += "\"" + String(zh_phrase_texts[i]) + "\"";
+    json += "\"" + phraseTexts[i] + "\"";
   }
   json += "]}";
   server.send(200, "application/json", json);
@@ -382,6 +406,7 @@ void setup() {
 #else
   Serial.println("[SD] disabled: using built-in gougou image");
 #endif
+  initPhrases();
   tft.init();
   tft.setRotation(1);
   pinMode(25, OUTPUT);
@@ -431,7 +456,7 @@ void loop() {
   // 鼓励语轮换(每12秒)
   if (now - lastPhraseAt > 12000) {
     lastPhraseAt = now;
-    phraseIdx = (phraseIdx + 1) % ZH_PHRASE_COUNT;
+    phraseIdx = (phraseIdx + 1) % phraseCount;
     drawZhPhrase(phraseIdx);
   }
 }
