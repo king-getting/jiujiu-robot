@@ -49,8 +49,20 @@ void drawBmp(const char *filename, int16_t x, int16_t y) {
 void setup() {
   Serial.begin(115200);
   delay(500);
+  Serial.println("[step] serial ok");
+  pinMode(SD_CS, OUTPUT);
+  digitalWrite(SD_CS, HIGH);
+  SPI.begin(18, 19, 23, SD_CS);
+  Serial.println("[step] sd begin...");
+  if (!SD.begin(SD_CS, SPI, 400000)) {
+    Serial.println("[FAIL] SD初始化失败（记得把卡插回模块！）");
+    while (1) delay(1000);
+  }
+  Serial.println("[OK] SD就绪");
+
   tft.init();
   tft.setRotation(1);
+  Serial.println("[step] tft ok");
   pinMode(25, OUTPUT);
   digitalWrite(25, HIGH);
   tft.fillScreen(TFT_BLACK);
@@ -59,14 +71,7 @@ void setup() {
   pinMode(21, OUTPUT);
   digitalWrite(21, HIGH);
 
-  SPI.begin(18, 19, 23, SD_CS);
-  if (!SD.begin(SD_CS, SPI, 4000000)) {
-    Serial.println("[FAIL] SD初始化失败（记得把卡插回模块！）");
-    tft.drawString("SD FAIL", 10, 10, 4);
-    while (1) delay(1000);
-  }
-  Serial.println("[OK] SD就绪");
-  drawBmp("/test.bmp", 0, 0);
+  drawBmp("/gougou.bmp", 0, 0);
 }
 
 void loop() {}

@@ -3,6 +3,8 @@
 // 未启用: 触摸 / SD卡 / 语音(后续版本)
 #include <FS.h>
 #include <TFT_eSPI.h>
+#include <SPI.h>
+#include <SD.h>
 #include <WiFi.h>
 #include <WebServer.h>
 #include <DHT.h>
@@ -11,8 +13,16 @@
 #include <BLEUtils.h>
 #include <BLE2902.h>
 #include "chinese_phrases.h"
+#include "gougou.h"
 
 TFT_eSPI tft = TFT_eSPI();
+#define USE_SD_IMAGE 0  // 0=内置狗头(稳定/快), 1=从SD读图(需按独立SPI接线)
+SPIClass SDSPI(HSPI);
+#define SD_SCK  14
+#define SD_MISO 12
+#define SD_MOSI 13
+#define SD_CS   33
+bool sdOk = false;
 
 const char* zh_phrase_texts[] = {
   "我在呢",
@@ -73,6 +83,7 @@ String sanitizeAscii(const String& s) {
 unsigned long msgShownUntil = 0;
 unsigned long lastBlinkAt = 0;
 bool blinking = false;
+bool idleDirty = true;
 int phraseIdx = 0;
 unsigned long lastPhraseAt = 0;
 String myIP = "";
@@ -99,6 +110,41 @@ String jsonStr(const String& body, const char* key) {
 }
 
 // ---------- 绘图 ----------
+uint16_t read16(File &f) { uint16_t r; f.read((uint8_t*)&r, 2); return r; }
+uint32_t read32(File &f) { uint32_t r; f.read((uint8_t*)&r, 4); return r; }
+
+bool drawBmpFromSd(const char *filename, int16_t x, int16_t y) {
+  if (!sdOk) return false;
+  File bmpFile = SD.open(filename);
+  if (!bmpFile) { bmpFile.close(); return false; }
+  if (read16(bmpFile) != 0x4D42) { bmpFile.close(); return false; }
+  read32(bmpFile); read32(bmpFile);
+  uint32_t dataOffset = read32(bmpFile);
+  read32(bmpFile);
+  int32_t w = read32(bmpFile);
+  int32_t h = read32(bmpFile);
+  if (read16(bmpFile) != 1 || read16(bmpFile) != 24) { bmpFile.close(); return false; }
+  read32(bmpFile);
+
+  uint32_t rowSize = (w * 3 + 3) & ~3;
+  bool flip = true;
+  if (h < 0) { h = -h; flip = false; }
+
+  uint8_t  lineBuf[320 * 3];
+  uint16_t pixBuf[320];
+  for (int row = 0; row < h && row < 240; row++) {
+    uint32_t pos = dataOffset + (flip ? (uint32_t)(h - 1 - row) : (uint32_t)row) * rowSize;
+    bmpFile.seek(pos);
+    bmpFile.read(lineBuf, rowSize);
+    for (int col = 0; col < w && col < 320; col++) {
+      pixBuf[col] = tft.color565(lineBuf[col*3+2], lineBuf[col*3+1], lineBuf[col*3]);
+    }
+    tft.pushImage(x, y + row, w, 1, pixBuf);
+  }
+  bmpFile.close();
+  return true;
+}
+
 void drawHeart(int cx, int cy, int s, uint16_t c) {
   tft.fillCircle(cx - s/3, cy - s/6, s/3, c);
   tft.fillCircle(cx + s/3, cy - s/6, s/3, c);
@@ -106,38 +152,15 @@ void drawHeart(int cx, int cy, int s, uint16_t c) {
 }
 
 void drawWelcome() {
-  tft.fillScreen(BG_PINK);
-  tft.setTextColor(TFT_WHITE, BG_PINK);
-  tft.setTextDatum(MC_DATUM);
-  tft.drawString("JIUJIU", 160, 60, 6);
-  tft.setTextColor(BG_DEEP, BG_PINK);
-  tft.drawString("hello my friend", 160, 110, 2);
   drawFace(false);
   drawZhPhrase(0);
-  tft.setTextColor(TFT_DARKGREY, BG_PINK);
-  tft.drawString("connecting...", 160, 228, 2);
 }
 
 void drawFace(bool blink) {
-  tft.fillScreen(BG_PINK);
-  tft.fillTriangle(74, 92, 94, 34, 132, 76, BG_DEEP);   // 左耳
-  tft.fillTriangle(246, 92, 226, 34, 188, 76, BG_DEEP); // 右耳
-  tft.fillCircle(160, 100, 72, SKIN);            // 脸
-  if (blink) {
-    tft.fillRect(124, 80, 22, 5, TFT_BLACK);     // 闭眼
-    tft.fillRect(174, 80, 22, 5, TFT_BLACK);
-  } else {
-    tft.fillCircle(134, 82, 9, TFT_BLACK);       // 眼睛
-    tft.fillCircle(186, 82, 9, TFT_BLACK);
-    tft.fillCircle(137, 79, 3, TFT_WHITE);       // 高光
-    tft.fillCircle(189, 79, 3, TFT_WHITE);
-  }
-  tft.fillCircle(116, 112, 12, BLUSH);           // 腮红
-  tft.fillCircle(204, 112, 12, BLUSH);
-  tft.fillCircle(160, 118, 8, TFT_BLACK);        // 鼻子
-  tft.fillCircle(160, 130, 3, TFT_WHITE);        // 鼻子高光
-  tft.drawArc(160, 126, 14, 10, 30, 150, TFT_BLACK, BG_PINK);
-  tft.drawLine(160, 128, 160, 133, TFT_BLACK);
+#if USE_SD_IMAGE
+  if (drawBmpFromSd("/gougou.bmp", 0, 0)) return;
+#endif
+  tft.pushImage(0, 0, GOUGOU_W, GOUGOU_H, gougou_bmp);
 }
 
 void drawZhPhrase(int idx) {
@@ -174,6 +197,7 @@ void drawMessage(const String& text) {
   tft.setTextDatum(BC_DATUM);
   tft.setTextColor(BG_DEEP, BG_PINK);
   tft.drawString("from your phone", 160, 225, 2);
+  idleDirty = true;
 }
 
 // ---------- HTTP ----------
@@ -300,17 +324,11 @@ void setupBLE() {
 }
 // ---------- WiFi ----------
 void setupWiFi() {
-  Serial.println("[WiFi] scanning...");
-  int n = WiFi.scanNetworks();
-  for (int i = 0; i < n && i < 8; i++) {
-    Serial.printf("[scan] %s ch=%d rssi=%d\n", WiFi.SSID(i).c_str(), WiFi.channel(i), WiFi.RSSI(i));
-  }
-  WiFi.scanDelete();
   Serial.println("[WiFi] STA connecting...");
   WiFi.mode(WIFI_STA);
   WiFi.begin(WIFI_SSID, WIFI_PWD);
   unsigned long t0 = millis();
-  while (WiFi.status() != WL_CONNECTED && millis() - t0 < 10000) delay(400);
+  while (WiFi.status() != WL_CONNECTED && millis() - t0 < 6000) delay(200);
   if (WiFi.status() == WL_CONNECTED) {
     myIP = WiFi.localIP().toString();
     Serial.printf("[WiFi] STA connected, IP=%s\n", myIP.c_str());
@@ -333,6 +351,15 @@ void setup() {
   digitalWrite(DHT_POWER_PIN, HIGH);   // DHT11 上电
   delay(500);
   dht.begin();
+#if USE_SD_IMAGE
+  pinMode(SD_CS, OUTPUT);
+  digitalWrite(SD_CS, HIGH);
+  SPI.begin(18, 19, 23, SD_CS);
+  sdOk = SD.begin(SD_CS, SPI, 400000);
+  Serial.printf("[SD] %s\n", sdOk ? "ok" : "fail");
+#else
+  Serial.println("[SD] disabled: using built-in gougou image");
+#endif
   tft.init();
   tft.setRotation(1);
   pinMode(25, OUTPUT);
@@ -340,8 +367,7 @@ void setup() {
   tft.fillScreen(BG_PINK);
   drawWelcome();
   setupWiFi();
-  drawFace(false);
-  lastBlinkAt = millis();
+  idleDirty = false;
   lastPhraseAt = millis();
   server.on("/", handleRoot);
   server.on("/api/message", HTTP_POST, handleMessage);
@@ -373,15 +399,10 @@ void loop() {
   // 消息显示中 -> 不画表情
   if (now < msgShownUntil) return;
 
-  // 表情眨眼动画
-  if (!blinking && now - lastBlinkAt > 3200) { blinking = true; lastBlinkAt = now; }
-  if (blinking && now - lastBlinkAt > 180) {
-    blinking = false;
-    lastBlinkAt = now;
+  // 从消息页回到待机狗头
+  if (idleDirty) {
+    idleDirty = false;
     drawFace(false);
-    drawZhPhrase(phraseIdx);
-  } else if (blinking) {
-    drawFace(true);
     drawZhPhrase(phraseIdx);
   }
 
