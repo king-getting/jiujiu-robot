@@ -226,6 +226,13 @@ void drawWelcome() {
   drawZhPhrase(0);
 }
 
+void drawIdle() {
+  tft.startWrite();
+  drawFace(false);
+  drawZhPhrase(phraseIdx);
+  tft.endWrite();
+}
+
 void drawFace(bool blink) {
 #if USE_SD_IMAGE
   if (drawBmpFromSd("/gougou.bmp", 0, 0)) return;
@@ -696,15 +703,14 @@ void loop() {
   // 从消息页回到待机狗头
   if (idleDirty) {
     idleDirty = false;
-    drawFace(false);
-    drawZhPhrase(phraseIdx);
+    drawIdle();
   }
 
   // 鼓励语轮换(每12秒)
   if (now - lastPhraseAt > 12000) {
     lastPhraseAt = now;
     phraseIdx = (phraseIdx + 1) % phraseCount;
-    drawZhPhrase(phraseIdx);
+    drawIdle();
   }
 }
 
