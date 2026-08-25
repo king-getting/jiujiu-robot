@@ -9,6 +9,7 @@
 #include <WebServer.h>
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
+#include <Preferences.h>
 #include <DHT.h>
 #include <BLEDevice.h>
 #include <BLEServer.h>
@@ -103,6 +104,25 @@ const char* WIFI_SSID = "Jiujiu-Hotspot";
 const char* WIFI_PWD  = "12345678";
 const char* AP_SSID   = "Jiujiu";        // 连不上热点时开的AP
 const char* AP_PWD    = "12345678";
+
+// 用 Preferences 保存 App 通过蓝牙配网时填写的热点账号/密码。
+Preferences wifiPrefs;
+
+void saveWifiCredentials(const String& ssid, const String& pwd) {
+  wifiPrefs.begin("jiujiu", false);
+  wifiPrefs.putString("ssid", ssid);
+  wifiPrefs.putString("pwd", pwd);
+  wifiPrefs.end();
+  Serial.printf("[wifi] saved ssid=%s pwdLen=%d\n", ssid.c_str(), pwd.length());
+}
+
+void loadWifiCredentials(String& ssid, String& pwd) {
+  wifiPrefs.begin("jiujiu", true);
+  ssid = wifiPrefs.getString("ssid", String(WIFI_SSID));
+  pwd = wifiPrefs.getString("pwd", String(WIFI_PWD));
+  wifiPrefs.end();
+  Serial.printf("[wifi] load ssid=%s pwdLen=%d\n", ssid.c_str(), pwd.length());
+}
 
 // ---------- 大模型配置 (DeepSeek / OpenAI兼容) ----------
 #define LLM_API_URL   "https://api.deepseek.com/chat/completions"
@@ -475,8 +495,11 @@ void handlePhraseList() {
 BLECharacteristic* bleNotifyChar = nullptr;
 String bleIncoming = "";
 String bleChatText = "";
+String bleWifiSsid = "";
+String bleWifiPwd = "";
 volatile bool bleMsgReady = false;
 volatile bool bleChatReady = false;
+volatile bool bleWifiReady = false;
 
 void bleReply(const char* json) {
   if (bleNotifyChar) {
@@ -501,7 +524,13 @@ class JiuJiuBleWrite : public BLECharacteristicCallbacks {
       bleChatReady = true;
       bleReply("{\"ok\":true}");
     } else if (cmd == "wifi") {
-      bleReply("{\"ok\":false,\"err\":\"半成品未支持配网, 请连AP模式 Jiujiu/12345678\"}");
+      bleWifiSsid = jsonStr(body, "ssid");
+      bleWifiPwd = jsonStr(body, "pwd");
+      if (bleWifiSsid.length() == 0) {
+        bleReply("{\"ok\":false,\"err\":\"WiFi名称不能为空\"}");
+      } else {
+        bleWifiReady = true;  // 主循环执行连接, 避免在 BLE 回调里长时间阻塞
+      }
     } else {
       bleReply("{\"ok\":false,\"err\":\"bad cmd\"}");
     }
@@ -540,24 +569,57 @@ void setupBLE() {
   Serial.println("[ble] server started (JIUJIU)");
 }
 // ---------- WiFi ----------
-void setupWiFi() {
-  Serial.println("[WiFi] STA connecting...");
+void startApMode() {
+  Serial.println("[WiFi] switch to AP only");
+  WiFi.disconnect();
+  WiFi.mode(WIFI_OFF);
+  delay(300);
+  WiFi.mode(WIFI_AP);
+  WiFi.softAP(AP_SSID, AP_PWD, 1, 0);
+  myIP = WiFi.softAPIP().toString();
+  Serial.printf("[WiFi] AP mode IP=%s (SSID=%s)\n", myIP.c_str(), AP_SSID);
+}
+
+bool connectToWifi(const String& ssid, const String& pwd, unsigned long timeoutMs) {
+  Serial.printf("[WiFi] STA connecting to %s ...\n", ssid.c_str());
+  WiFi.disconnect();
   WiFi.mode(WIFI_STA);
-  WiFi.begin(WIFI_SSID, WIFI_PWD);
+  WiFi.begin(ssid.c_str(), pwd.c_str());
   unsigned long t0 = millis();
-  while (WiFi.status() != WL_CONNECTED && millis() - t0 < 6000) delay(200);
+  while (WiFi.status() != WL_CONNECTED && millis() - t0 < timeoutMs) delay(200);
   if (WiFi.status() == WL_CONNECTED) {
     myIP = WiFi.localIP().toString();
     Serial.printf("[WiFi] STA connected, IP=%s\n", myIP.c_str());
+    return true;
+  }
+  Serial.println("[WiFi] STA failed");
+  return false;
+}
+
+void setupWiFi() {
+  WiFi.persistent(false);  // 不启用 Arduino 自动重连, 账号由 Preferences 管理
+  String ssid, pwd;
+  loadWifiCredentials(ssid, pwd);
+  if (!connectToWifi(ssid, pwd, 8000)) startApMode();
+}
+
+void applyBleWifi() {
+  bleWifiReady = false;
+  saveWifiCredentials(bleWifiSsid, bleWifiPwd);
+  currentMsg = "连接 WiFi: " + bleWifiSsid;
+  msgShownUntil = millis() + 30000;
+  drawMessage(currentMsg);
+  if (connectToWifi(bleWifiSsid, bleWifiPwd, 12000)) {
+    bleReply(("{\"ok\":true,\"ip\":\"" + myIP + "\"}").c_str());
+    currentMsg = "WiFi 已连接";
+    msgShownUntil = millis() + 10000;
+    drawMessage(currentMsg);
   } else {
-    Serial.println("[WiFi] STA failed -> switch to AP only");
-    WiFi.disconnect();
-    WiFi.mode(WIFI_OFF);
-    delay(300);
-    WiFi.mode(WIFI_AP);
-    WiFi.softAP(AP_SSID, AP_PWD, 1, 0);
-    myIP = WiFi.softAPIP().toString();
-    Serial.printf("[WiFi] AP mode IP=%s (SSID=%s)\n", myIP.c_str(), AP_SSID);
+    startApMode();
+    bleReply("{\"ok\":false,\"err\":\"WiFi连接失败, 请检查热点名称/密码\"}");
+    currentMsg = "WiFi 失败, 已回 AP";
+    msgShownUntil = millis() + 10000;
+    drawMessage(currentMsg);
   }
 }
 
@@ -610,6 +672,10 @@ void loop() {
     currentMsg = bleIncoming;
     msgShownUntil = millis() + 10000;
     drawMessage(currentMsg);
+  }
+
+  if (bleWifiReady) {
+    applyBleWifi();
   }
 
   if (bleChatReady) {
