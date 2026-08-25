@@ -7,6 +7,8 @@
 #include <SD.h>
 #include <WiFi.h>
 #include <WebServer.h>
+#include <HTTPClient.h>
+#include <WiFiClientSecure.h>
 #include <DHT.h>
 #include <BLEDevice.h>
 #include <BLEServer.h>
@@ -14,6 +16,7 @@
 #include <BLE2902.h>
 #include "chinese_phrases.h"
 #include "gougou.h"
+#include "gb2312_16.h"
 
 TFT_eSPI tft = TFT_eSPI();
 #define USE_SD_IMAGE 0  // 0=内置狗头(稳定/快), 1=从SD读图(需按独立SPI接线)
@@ -100,6 +103,12 @@ const char* WIFI_SSID = "Jiujiu-Hotspot";
 const char* WIFI_PWD  = "12345678";
 const char* AP_SSID   = "Jiujiu";        // 连不上热点时开的AP
 const char* AP_PWD    = "12345678";
+
+// ---------- 大模型配置 (DeepSeek / OpenAI兼容) ----------
+#define LLM_API_URL   "https://api.deepseek.com/chat/completions"
+#define LLM_MODEL     "deepseek-chat"
+#define LLM_API_KEY   "PASTE_YOUR_API_KEY_HERE"
+#define LLM_SYSTEM_PROMPT "你是啾啾，一只可爱、温柔、会鼓励人的小狗。回复要简短，不超过60个字，不要用Markdown。"
 
 WebServer server(80);
 
@@ -216,6 +225,65 @@ void drawZhPhrase(int idx) {
   tft.drawBitmap(x, y, p->data, p->w, 24, BG_DEEP, BG_PINK);
 }
 
+int utf8Next(const String& s, int i, uint32_t& cp) {
+  if (i >= (int)s.length()) return 0;
+  uint8_t b = (uint8_t)s[i];
+  if (b < 0x80) { cp = b; return 1; }
+  if ((b & 0xE0) == 0xC0 && i + 1 < (int)s.length()) {
+    cp = ((uint32_t)(b & 0x1F) << 6) | ((uint8_t)s[i + 1] & 0x3F);
+    return 2;
+  }
+  if ((b & 0xF0) == 0xE0 && i + 2 < (int)s.length()) {
+    cp = ((uint32_t)(b & 0x0F) << 12) | (((uint8_t)s[i + 1] & 0x3F) << 6) | ((uint8_t)s[i + 2] & 0x3F);
+    return 3;
+  }
+  cp = (uint32_t)'?';
+  return 1;
+}
+
+bool getGbGlyph(uint32_t cp, uint8_t out[32]) {
+  int lo = 0, hi = GB2312_GLYPH_COUNT - 1;
+  while (lo <= hi) {
+    int mid = (lo + hi) / 2;
+    uint16_t c = pgm_read_word(&gb2312_unicode[mid]);
+    if (c == cp) {
+      memcpy_P(out, &gb2312_font[mid * 32], 32);
+      return true;
+    }
+    if (c < cp) lo = mid + 1;
+    else hi = mid - 1;
+  }
+  return false;
+}
+
+int utf8CharWidth(uint32_t cp) {
+  if (cp < 0x80) return tft.textWidth(String((char)cp), 2);
+  return 16;
+}
+
+void drawUtf8Wrapped(const String& text, int x, int y, int maxWidth, int lineHeight,
+                     uint16_t fg, uint16_t bg, int maxLines) {
+  int cx = x, cy = y, line = 0, i = 0;
+  while (i < (int)text.length() && line < maxLines) {
+    uint32_t cp;
+    int n = utf8Next(text, i, cp);
+    if (n <= 0) break;
+    if (cp == '\n') { cx = x; cy += lineHeight; line++; i += n; continue; }
+    int w = utf8CharWidth(cp);
+    if (cx + w > x + maxWidth && cx > x) { cx = x; cy += lineHeight; line++; }
+    if (line >= maxLines) break;
+    if (cp < 0x80) {
+      tft.drawChar(cx, cy, (char)cp, fg, bg, 2);
+    } else {
+      uint8_t glyph[32];
+      if (getGbGlyph(cp, glyph)) tft.drawBitmap(cx, cy, glyph, 16, 16, fg, bg);
+      else tft.drawChar(cx, cy, '?', fg, bg, 2);
+    }
+    cx += w;
+    i += n;
+  }
+}
+
 void drawMessage(const String& text) {
   tft.fillScreen(BG_PINK);
   tft.setTextColor(TFT_WHITE, BG_DEEP);
@@ -223,23 +291,8 @@ void drawMessage(const String& text) {
   tft.fillRect(0, 0, 320, 36, BG_DEEP);
   tft.drawString("Message", 160, 8, 2);
   tft.setTextColor(TFT_DARKGREY, BG_PINK);
-  tft.setTextDatum(MC_DATUM);
-  // 简易换行
-  String remain = text;
-  int line = 0;
-  while (remain.length() > 0 && line < 4) {
-    String one = remain;
-    if ((int)tft.textWidth(one, 4) > 300) {
-      int cut = one.length();
-      while (cut > 0 && (int)tft.textWidth(one.substring(0, cut), 4) > 300) cut--;
-      one = one.substring(0, cut);
-      remain = remain.substring(cut);
-    } else {
-      remain = "";
-    }
-    tft.drawString(one, 160, 90 + line * 42, 4);
-    line++;
-  }
+  tft.setTextDatum(TL_DATUM);
+  drawUtf8Wrapped(text, 10, 70, 300, 30, TFT_DARKGREY, BG_PINK, 5);
   tft.setTextDatum(BC_DATUM);
   tft.setTextColor(BG_DEEP, BG_PINK);
   tft.drawString("from your phone", 160, 225, 2);
@@ -250,7 +303,80 @@ void drawMessage(const String& text) {
 void handleRoot() {
   Serial.println("[http] GET /");
   server.send(200, "text/plain; charset=utf-8",
-    "Jiujiu is alive!\nIP: " + myIP + "\nPOST /api/message {ver:1,cmd:\"msg\",text:\"...\"}\nGET /api/status");
+    "Jiujiu is alive!\nIP: " + myIP + "\nPOST /api/message {ver:1,cmd:\"msg\"|\"chat\",text:\"...\"}\nGET /api/status");
+}
+
+String llmEscape(const String& s) {
+  String out = "";
+  for (unsigned int i = 0; i < s.length(); i++) {
+    char c = s[i];
+    if (c == '\\') out += "\\\\";
+    else if (c == '"') out += "\\\"";
+    else if (c == '\n') out += "\\n";
+    else if (c == '\r') { }
+    else out += c;
+  }
+  return out;
+}
+
+String llmUnescape(const String& s) {
+  String out = "";
+  for (unsigned int i = 0; i < s.length(); i++) {
+    char c = s[i];
+    if (c == '\\' && i + 1 < (int)s.length()) {
+      char n = s[i + 1];
+      if (n == 'n') { out += '\n'; i++; }
+      else if (n == '"') { out += '"'; i++; }
+      else if (n == '\\') { out += '\\'; i++; }
+      else out += c;
+    } else {
+      out += c;
+    }
+  }
+  return out;
+}
+
+String extractLlmContent(const String& json) {
+  int key = json.indexOf("\"content\"");
+  if (key < 0) return "";
+  int colon = json.indexOf(':', key);
+  if (colon < 0) return "";
+  int q = json.indexOf('"', colon + 1);
+  if (q < 0) return "";
+  int end = q + 1;
+  while (end < (int)json.length()) {
+    if (json[end] == '"' && json[end - 1] != '\\') break;
+    end++;
+  }
+  if (end >= (int)json.length()) return "";
+  return json.substring(q + 1, end);
+}
+
+String askLLM(const String& userText) {
+  if (WiFi.status() != WL_CONNECTED) return "网络还没连上，先让啾啾连WiFi。";
+  if (String(LLM_API_KEY) == "PASTE_YOUR_API_KEY_HERE") return "还没填大模型API Key。";
+
+  String body = "{\"model\":\"" + String(LLM_MODEL) +
+                "\",\"messages\":[{\"role\":\"system\",\"content\":\"" + llmEscape(LLM_SYSTEM_PROMPT) +
+                "\"},{\"role\":\"user\",\"content\":\"" + llmEscape(userText) +
+                "\"}],\"max_tokens\":120,\"temperature\":0.8}";
+
+  WiFiClientSecure client;
+  client.setInsecure();
+  HTTPClient http;
+  http.setTimeout(20000);
+  if (!http.begin(client, LLM_API_URL)) return "连接大模型失败。";
+  http.addHeader("Content-Type", "application/json");
+  http.addHeader("Authorization", String("Bearer ") + LLM_API_KEY);
+  int code = http.POST(body);
+  String resp = http.getString();
+  http.end();
+  Serial.printf("[llm] code=%d len=%d\n", code, resp.length());
+  if (code <= 0) return "网络请求失败，检查WiFi和API地址。";
+  if (code != 200) return "大模型返回错误：" + String(code);
+  String reply = extractLlmContent(resp);
+  if (reply.length() == 0) return "啾啾没想好怎么回，再试一次。";
+  return llmUnescape(reply);
 }
 
 void handleMessage() {
@@ -261,9 +387,19 @@ void handleMessage() {
   }
   String cmd = jsonStr(body, "cmd");
   if (cmd == "msg" || cmd == "message") {
-    currentMsg = sanitizeAscii(jsonStr(body, "text"));
+    currentMsg = jsonStr(body, "text");
     if (currentMsg.length() == 0) currentMsg = "(empty)";
     msgShownUntil = millis() + 10000;   // 显示10秒
+    drawMessage(currentMsg);
+    server.send(200, "application/json", "{\"ok\":true}");
+  } else if (cmd == "chat") {
+    String question = jsonStr(body, "text");
+    if (question.length() == 0) question = "陪我聊聊天吧";
+    currentMsg = "正在想...";
+    msgShownUntil = millis() + 30000;
+    drawMessage(currentMsg);
+    currentMsg = askLLM(question);
+    msgShownUntil = millis() + 30000;
     drawMessage(currentMsg);
     server.send(200, "application/json", "{\"ok\":true}");
   } else {
@@ -310,7 +446,9 @@ void handlePhraseList() {
 
 BLECharacteristic* bleNotifyChar = nullptr;
 String bleIncoming = "";
+String bleChatText = "";
 volatile bool bleMsgReady = false;
+volatile bool bleChatReady = false;
 
 void bleReply(const char* json) {
   if (bleNotifyChar) {
@@ -325,9 +463,14 @@ class JiuJiuBleWrite : public BLECharacteristicCallbacks {
     Serial.println("[ble] recv: " + body);
     String cmd = jsonStr(body, "cmd");
     if (cmd == "msg" || cmd == "message") {
-      bleIncoming = sanitizeAscii(jsonStr(body, "text"));
+      bleIncoming = jsonStr(body, "text");
       if (bleIncoming.length() == 0) bleIncoming = "(empty)";
       bleMsgReady = true;   // 主循环绘制, 避免与TFT SPI冲突
+      bleReply("{\"ok\":true}");
+    } else if (cmd == "chat") {
+      bleChatText = jsonStr(body, "text");
+      if (bleChatText.length() == 0) bleChatText = "陪我聊聊天吧";
+      bleChatReady = true;
       bleReply("{\"ok\":true}");
     } else if (cmd == "wifi") {
       bleReply("{\"ok\":false,\"err\":\"半成品未支持配网, 请连AP模式 Jiujiu/12345678\"}");
@@ -438,6 +581,16 @@ void loop() {
     bleMsgReady = false;
     currentMsg = bleIncoming;
     msgShownUntil = millis() + 10000;
+    drawMessage(currentMsg);
+  }
+
+  if (bleChatReady) {
+    bleChatReady = false;
+    currentMsg = "正在想...";
+    msgShownUntil = millis() + 30000;
+    drawMessage(currentMsg);
+    currentMsg = askLLM(bleChatText);
+    msgShownUntil = millis() + 30000;
     drawMessage(currentMsg);
   }
 
