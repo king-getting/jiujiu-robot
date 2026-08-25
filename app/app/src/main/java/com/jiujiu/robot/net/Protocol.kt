@@ -9,6 +9,7 @@ object Protocol {
 
     // cmd 值
     const val CMD_MSG = "msg"
+    const val CMD_CHAT = "chat"
     const val CMD_ADD = "add"
     const val CMD_DEL = "del"
     const val CMD_WIFI = "wifi"
@@ -51,6 +52,7 @@ sealed class ApiResult<out T> {
 interface JiuJiuApi {
     /** 发消息到屏幕。tts 为协议预留字段：语音模块未安装，固件端忽略即可 */
     suspend fun sendMessage(text: String, tts: Boolean): ApiResult<Unit>
+    suspend fun sendChat(text: String): ApiResult<Unit>
     suspend fun readSensor(): ApiResult<SensorData>
     suspend fun phraseList(): ApiResult<List<String>>
     suspend fun phraseAdd(text: String): ApiResult<Unit>

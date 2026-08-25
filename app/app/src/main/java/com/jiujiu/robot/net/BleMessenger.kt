@@ -55,7 +55,11 @@ class BleMessenger(private val appContext: Context) {
     /** 挂起的协程：等待 notify 回执 */
     private var ackWaiter: kotlin.coroutines.Continuation<Result>? = null
 
-    suspend fun sendMessage(text: String): Result = try {
+    suspend fun sendMessage(text: String): Result = send(text, Protocol.CMD_MSG)
+
+    suspend fun sendChat(text: String): Result = send(text, Protocol.CMD_CHAT)
+
+    private suspend fun send(text: String, cmd: String): Result = try {
         withTimeout(SEND_TIMEOUT_MS) {
             if (!connected) {
                 when (val r = doConnect()) {
@@ -63,14 +67,13 @@ class BleMessenger(private val appContext: Context) {
                     else -> {}
                 }
             }
-            doSend(text)
+            doSend(text, cmd)
         }
     } catch (e: TimeoutCancellationException) {
         Result.Failure("蓝牙响应超时，请确认啾啾已开机且在附近")
     } catch (e: Exception) {
         Result.Failure("蓝牙发送失败：${e.message ?: "未知原因"}")
     }
-
     fun disconnect() {
         scanCallback?.let { runCatching { adapter?.bluetoothLeScanner?.stopScan(it) } }
         scanCallback = null
@@ -194,7 +197,7 @@ class BleMessenger(private val appContext: Context) {
         return null
     }
 
-    private suspend fun doSend(text: String): Result = suspendCancellableCoroutine { cont ->
+    private suspend fun doSend(text: String, cmd: String): Result = suspendCancellableCoroutine { cont ->
         ackWaiter = cont
         val wc = writeChar
         if (wc == null) {
@@ -204,7 +207,7 @@ class BleMessenger(private val appContext: Context) {
         }
         val payload = JSONObject().apply {
             put("ver", Protocol.VER)
-            put("cmd", Protocol.CMD_MSG)
+            put("cmd", cmd)
             put("text", text)
             put("tts", false)
         }.toString().toByteArray(Charsets.UTF_8)

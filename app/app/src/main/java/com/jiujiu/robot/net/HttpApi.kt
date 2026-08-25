@@ -31,6 +31,13 @@ class HttpApi(private val deviceIp: String) : JiuJiuApi {
             put("tts", tts)
         }).map { }
 
+    override suspend fun sendChat(text: String): ApiResult<Unit> =
+        post(Protocol.PATH_MESSAGE, JSONObject().apply {
+            put("ver", Protocol.VER)
+            put("cmd", Protocol.CMD_CHAT)
+            put("text", text)
+        }).map { }
+
     override suspend fun readSensor(): ApiResult<SensorData> =
         get(Protocol.PATH_SENSOR).map { json ->
             SensorData(

@@ -32,7 +32,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
-            android:text="消息会显示在啾啾的屏幕上"
+            android:text="消息会显示在屏幕上；开启 AI 后啾啾会回复你"
             android:textColor="@color/text_sub"
             android:textSize="13sp" />
 
@@ -77,6 +77,35 @@
             android:layout_height="wrap_content"
             android:layout_marginStart="4dp"
             android:text="开启后通过蓝牙把消息直接发给 JIUJIU，不需要手机热点或路由器"
+            android:textColor="@color/text_sub"
+            android:textSize="12sp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <com.google.android.material.materialswitch.MaterialSwitch
+                android:id="@+id/switch_chat"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:text="大模型陪伴聊天（AI）"
+                android:textColor="@color/text_main"
+                android:textSize="14sp" />
+        </LinearLayout>
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="4dp"
+            android:text="开启后消息发给 DeepSeek 大模型，需要啾啾已连上手机热点/路由器互联网"
             android:textColor="@color/text_sub"
             android:textSize="12sp" />
 

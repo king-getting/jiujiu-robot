@@ -22,6 +22,11 @@ class MockApi : JiuJiuApi {
         return if (text.isBlank()) ApiResult.Err("消息不能为空") else ApiResult.Ok(Unit)
     }
 
+    override suspend fun sendChat(text: String): ApiResult<Unit> {
+        delay(400)
+        return if (text.isBlank()) ApiResult.Err("内容不能为空") else ApiResult.Ok(Unit)
+    }
+
     override suspend fun readSensor(): ApiResult<SensorData> {
         delay(300)
         return ApiResult.Ok(

@@ -26,6 +26,7 @@ class MessageFragment : Fragment() {
     private val bleMessenger by lazy { BleMessenger(requireContext().applicationContext) }
 
     private var pendingText: String? = null
+    private var pendingChat = false
 
     private val blePermissions: Array<String>
         get() = if (Build.VERSION.SDK_INT >= 31) {
@@ -37,11 +38,12 @@ class MessageFragment : Fragment() {
     private val permissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { grants ->
             if (grants.all { it.value }) {
-                pendingText?.let { sendViaBle(it) }
+                pendingText?.let { sendViaBle(it, pendingChat) }
             } else {
                 binding.textResult.text = "需要蓝牙权限才能直连啾啾"
             }
             pendingText = null
+            pendingChat = false
         }
 
     override fun onCreateView(
@@ -58,31 +60,34 @@ class MessageFragment : Fragment() {
                 binding.textResult.text = "先写点什么吧"
                 return@setOnClickListener
             }
-            if (binding.switchBle.isChecked) {
-                ensurePermissionsThenBle(text)
+            if (binding.switchChat.isChecked) {
+                if (binding.switchBle.isChecked) ensurePermissionsThenBle(text, chat = true)
+                else sendViaHttp(text, chat = true)
             } else {
-                sendViaHttp(text)
+                if (binding.switchBle.isChecked) ensurePermissionsThenBle(text)
+                else sendViaHttp(text)
             }
         }
     }
 
-    private fun ensurePermissionsThenBle(text: String) {
+    private fun ensurePermissionsThenBle(text: String, chat: Boolean = false) {
         val missing = blePermissions.filter {
             ContextCompat.checkSelfPermission(requireContext(), it) !=
                 PackageManager.PERMISSION_GRANTED
         }
-        if (missing.isEmpty()) sendViaBle(text)
+        if (missing.isEmpty()) sendViaBle(text, chat)
         else {
             pendingText = text
+            pendingChat = chat
             permissionLauncher.launch(missing.toTypedArray())
         }
     }
 
-    private fun sendViaHttp(text: String) {
+    private fun sendViaHttp(text: String, chat: Boolean = false) {
         setSending()
         viewLifecycleOwner.lifecycleScope.launch {
             // tts 恒为 false：语音输出已砍掉，字段保留兼容协议
-            when (val result = requireContext().api().sendMessage(text, tts = false)) {
+            when (val result = if (chat) requireContext().api().sendChat(text) else requireContext().api().sendMessage(text, tts = false)) {
                 is ApiResult.Ok -> {
                     binding.textResult.text = "已送达 ✅ 啾啾收到啦"
                     binding.editMessage.text?.clear()
@@ -93,10 +98,10 @@ class MessageFragment : Fragment() {
         }
     }
 
-    private fun sendViaBle(text: String) {
+    private fun sendViaBle(text: String, chat: Boolean = false) {
         setSending()
         viewLifecycleOwner.lifecycleScope.launch {
-            when (val result = bleMessenger.sendMessage(text)) {
+            when (val result = if (chat) bleMessenger.sendChat(text) else bleMessenger.sendMessage(text)) {
                 is BleMessenger.Result.Success -> {
                     binding.textResult.text = "已送达 ✅ 啾啾收到啦（蓝牙）"
                     binding.editMessage.text?.clear()
