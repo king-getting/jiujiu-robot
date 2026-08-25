@@ -429,9 +429,14 @@ String askLLM(const String& userText) {
 
   WiFiClientSecure client;
   client.setInsecure();
+  IPAddress apiIp(39, 174, 179, 5);
+  if (!client.connect(apiIp, 443, "api.deepseek.com", nullptr, nullptr, nullptr)) {
+    Serial.println("[llm] TLS/TCP connect fail");
+    return "连接大模型失败。";
+  }
   HTTPClient http;
   http.setTimeout(30000);
-  if (!http.begin(client, LLM_API_URL)) return "连接大模型失败。";
+  if (!http.begin(client, "api.deepseek.com", 443, "/chat/completions", true)) return "连接大模型失败。";
   http.addHeader("Content-Type", "application/json");
   http.addHeader("Authorization", String("Bearer ") + LLM_API_KEY);
   int code = http.POST(body);
