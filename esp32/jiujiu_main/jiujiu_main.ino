@@ -157,6 +157,7 @@ bool idleDirty = true;
 int phraseIdx = 0;
 unsigned long lastPhraseAt = 0;
 unsigned long lastDisplayReinitAt = 0;
+unsigned long lastDisplayCheckAt = 0;
 String myIP = "";
 
 // ---------- 简单 JSON 取值 (无 ArduinoJson) ----------
@@ -717,6 +718,17 @@ void loop() {
 
   // 消息显示中 -> 不画表情
   if (now < msgShownUntil) return;
+
+  // 每 2 秒读一次屏幕左上角, 发现全白就立刻重初始化
+  if (now - lastDisplayCheckAt > 2000) {
+    lastDisplayCheckAt = now;
+    uint16_t px = tft.readPixel(0, 0);
+    if (px == 0xFFFF) {
+      Serial.printf("[tft] white detected (px=%04X)\n", px);
+      idleDirty = false;
+      reinitDisplay();
+    }
+  }
 
   // 待机时每分钟自动重新初始化一次屏幕, 白屏后最长 1 分钟自动恢复
   if (now - lastDisplayReinitAt > 60000) {
