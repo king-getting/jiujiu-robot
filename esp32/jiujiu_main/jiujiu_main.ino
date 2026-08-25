@@ -156,6 +156,7 @@ bool blinking = false;
 bool idleDirty = true;
 int phraseIdx = 0;
 unsigned long lastPhraseAt = 0;
+unsigned long lastDisplayReinitAt = 0;
 String myIP = "";
 
 // ---------- 简单 JSON 取值 (无 ArduinoJson) ----------
@@ -231,6 +232,15 @@ void drawIdle() {
   drawFace(false);
   drawZhPhrase(phraseIdx);
   tft.endWrite();
+}
+
+void reinitDisplay() {
+  Serial.println("[tft] reinit display");
+  tft.init();
+  tft.setRotation(1);
+  pinMode(25, OUTPUT);
+  digitalWrite(25, HIGH);
+  drawIdle();
 }
 
 void drawFace(bool blink) {
@@ -708,6 +718,13 @@ void loop() {
   // 消息显示中 -> 不画表情
   if (now < msgShownUntil) return;
 
+  // 待机时每分钟自动重新初始化一次屏幕, 白屏后最长 1 分钟自动恢复
+  if (now - lastDisplayReinitAt > 60000) {
+    lastDisplayReinitAt = now;
+    idleDirty = false;
+    reinitDisplay();
+  }
+
   // 从消息页回到待机狗头
   if (idleDirty) {
     idleDirty = false;
@@ -718,7 +735,7 @@ void loop() {
   if (now - lastPhraseAt > 12000) {
     lastPhraseAt = now;
     phraseIdx = (phraseIdx + 1) % phraseCount;
-    drawIdle();
+    drawZhPhrase(phraseIdx);
   }
 }
 
