@@ -63,6 +63,7 @@ class BleProvisioner(private val context: Context) {
             var resumed = false
 
             var scanCallback: ScanCallback? = null
+            val notifyBuffer = StringBuilder()
 
             fun finish(result: Result) {
                 if (resumed) return
@@ -145,11 +146,10 @@ class BleProvisioner(private val context: Context) {
                 }
 
                 private fun handleNotify(value: ByteArray?) {
-                    val json = runCatching {
-                        JSONObject(String(value ?: return, Charsets.UTF_8))
-                    }.getOrElse {
-                        finish(Result.Failure("设备回执不是合法 JSON")); return
-                    }
+                    if (value == null) return
+                    notifyBuffer.append(String(value, Charsets.UTF_8))
+                    val json = runCatching { JSONObject(notifyBuffer.toString()) }.getOrNull()
+                        ?: return  // BLE 回执被拆成多包时, 等下一包拼完再解析
                     if (json.optBoolean("ok")) {
                         val ip = json.optString("ip")
                         if (ip.isNotBlank()) finish(Result.Success(ip))
