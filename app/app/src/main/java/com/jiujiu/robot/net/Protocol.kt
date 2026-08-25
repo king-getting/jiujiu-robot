@@ -23,7 +23,7 @@ object Protocol {
     const val PATH_STATUS = "/api/status"
 
     const val HTTP_TIMEOUT_MS = 3_000L
-    const val BLE_TIMEOUT_MS = 15_000L
+    const val BLE_TIMEOUT_MS = 30_000L
 }
 
 /** 传感器数据：air 为 MQ-135 原始 ADC 值 */
