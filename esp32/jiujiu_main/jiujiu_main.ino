@@ -430,15 +430,15 @@ String askLLM(const String& userText) {
   WiFiClientSecure client;
   client.setInsecure();
   HTTPClient http;
-  http.setTimeout(20000);
+  http.setTimeout(30000);
   if (!http.begin(client, LLM_API_URL)) return "连接大模型失败。";
   http.addHeader("Content-Type", "application/json");
   http.addHeader("Authorization", String("Bearer ") + LLM_API_KEY);
   int code = http.POST(body);
   String resp = http.getString();
   http.end();
-  Serial.printf("[llm] code=%d len=%d\n", code, resp.length());
-  if (code <= 0) return "网络请求失败，检查WiFi和API地址。";
+  Serial.printf("[llm] code=%d len=%d err=%s\n", code, resp.length(), http.errorToString(code).c_str());
+  if (code <= 0) return "网络请求失败，检查WiFi和API地址：" + http.errorToString(code);
   if (code != 200) return "大模型返回错误：" + String(code);
   String reply = extractLlmContent(resp);
   if (reply.length() == 0) return "啾啾没想好怎么回，再试一次。";
@@ -614,8 +614,10 @@ bool connectToWifi(const String& ssid, const String& pwd, unsigned long timeoutM
   unsigned long t0 = millis();
   while (WiFi.status() != WL_CONNECTED && millis() - t0 < timeoutMs) delay(200);
   if (WiFi.status() == WL_CONNECTED) {
+    WiFi.setDNS(IPAddress(223, 5, 5, 5), IPAddress(8, 8, 8, 8));
     myIP = WiFi.localIP().toString();
     Serial.printf("[WiFi] STA connected, IP=%s\n", myIP.c_str());
+    Serial.printf("[WiFi] DNS=%s / %s\n", WiFi.dnsIP(0).toString().c_str(), WiFi.dnsIP(1).toString().c_str());
     return true;
   }
   Serial.println("[WiFi] STA failed");
