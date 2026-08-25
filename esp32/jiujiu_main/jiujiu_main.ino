@@ -510,8 +510,16 @@ volatile bool bleWifiReady = false;
 
 void bleReply(const char* json) {
   if (bleNotifyChar) {
-    bleNotifyChar->setValue((uint8_t*)json, strlen(json));
-    bleNotifyChar->notify();
+    size_t len = strlen(json);
+    size_t off = 0;
+    while (off < len) {
+      size_t n = len - off;
+      if (n > 20) n = 20;   // BLE 默认 MTU 单包最大 20 字节
+      bleNotifyChar->setValue((uint8_t*)json + off, n);
+      bleNotifyChar->notify();
+      off += n;
+      delay(12);
+    }
   }
 }
 
