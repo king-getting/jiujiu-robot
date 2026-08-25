@@ -128,7 +128,7 @@ void loadWifiCredentials(String& ssid, String& pwd) {
 #define LLM_API_URL   "https://api.deepseek.com/chat/completions"
 #define LLM_MODEL     "deepseek-chat"
 #define LLM_API_KEY   "PASTE_YOUR_API_KEY_HERE"
-#define LLM_SYSTEM_PROMPT "你是啾啾，一只可爱、温柔、会鼓励人的小狗。回复要简短，不超过60个字，不要用Markdown。"
+#define LLM_SYSTEM_PROMPT "你是啾啾，一只来自海贼王的小狗，可爱、温柔、会鼓励人。你可以正常回答各种问题，尽量简洁；中文或英文都可以，一般不超过120个字，不要用Markdown。"
 
 WebServer server(80);
 
@@ -422,16 +422,22 @@ String askLLM(const String& userText) {
   if (WiFi.status() != WL_CONNECTED) return "网络还没连上，先让啾啾连WiFi。";
   if (String(LLM_API_KEY) == "PASTE_YOUR_API_KEY_HERE") return "还没填大模型API Key。";
 
+  IPAddress apiIp(39, 174, 179, 5);
+  Serial.printf("[net] use DeepSeek IP=%s (SNI api.deepseek.com)\n", apiIp.toString().c_str());
+  Serial.printf("[llm] freeHeap=%u maxBlock=%u\n", ESP.getFreeHeap(), ESP.getMaxAllocHeap());
+
   String body = "{\"model\":\"" + String(LLM_MODEL) +
                 "\",\"messages\":[{\"role\":\"system\",\"content\":\"" + llmEscape(LLM_SYSTEM_PROMPT) +
                 "\"},{\"role\":\"user\",\"content\":\"" + llmEscape(userText) +
-                "\"}],\"max_tokens\":120,\"temperature\":0.8}";
+                "\"}],\"max_tokens\":300,\"temperature\":0.8}";
 
   WiFiClientSecure client;
   client.setInsecure();
-  IPAddress apiIp(39, 174, 179, 5);
-  if (!client.connect(apiIp, 443, "api.deepseek.com", nullptr, nullptr, nullptr)) {
-    Serial.println("[llm] TLS/TCP connect fail");
+  int rc = client.connect(apiIp, 443, "api.deepseek.com", NULL, NULL, NULL);
+  if (rc != 1) {
+    char errbuf[128] = {0};
+    client.lastError(errbuf, sizeof(errbuf));
+    Serial.printf("[llm] TLS connect fail rc=%d err=%s\n", rc, errbuf);
     return "连接大模型失败。";
   }
   HTTPClient http;
@@ -622,6 +628,7 @@ bool connectToWifi(const String& ssid, const String& pwd, unsigned long timeoutM
     WiFi.setDNS(IPAddress(223, 5, 5, 5), IPAddress(8, 8, 8, 8));
     myIP = WiFi.localIP().toString();
     Serial.printf("[WiFi] STA connected, IP=%s\n", myIP.c_str());
+    Serial.printf("[WiFi] gw=%s mask=%s\n", WiFi.gatewayIP().toString().c_str(), WiFi.subnetMask().toString().c_str());
     Serial.printf("[WiFi] DNS=%s / %s\n", WiFi.dnsIP(0).toString().c_str(), WiFi.dnsIP(1).toString().c_str());
     return true;
   }
@@ -716,9 +723,11 @@ void loop() {
     currentMsg = "正在想...";
     msgShownUntil = millis() + 30000;
     drawMessage(currentMsg);
+    BLEDevice::deinit(false);
     currentMsg = askLLM(bleChatText);
     msgShownUntil = millis() + 30000;
     drawMessage(currentMsg);
+    setupBLE();
   }
 
   unsigned long now = millis();
