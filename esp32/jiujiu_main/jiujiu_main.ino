@@ -1,4 +1,4 @@
-﻿// 啾啾 半成品主程序 v0.9 (2026-08-22)
+// 啾啾 半成品主程序 v0.9 (2026-08-22)
 // 功能: 开机画面 + 表情动画 + WiFi(热点/AP兜底) + HTTP消息上屏 + 鼓励语
 // 未启用: 触摸 / SD卡 / 语音(后续版本)
 #include <FS.h>
@@ -264,24 +264,52 @@ int utf8CharWidth(uint32_t cp) {
 void drawUtf8Wrapped(const String& text, int x, int y, int maxWidth, int lineHeight,
                      uint16_t fg, uint16_t bg, int maxLines) {
   int cx = x, cy = y, line = 0, i = 0;
+  String asciiRun = "";
+  int asciiW = 0;
+
+  auto flushAscii = [&]() {
+    if (asciiRun.length() == 0) return;
+    tft.startWrite();
+    tft.drawString(asciiRun, cx, cy, 2);
+    tft.endWrite();
+    cx += asciiW;
+    asciiRun = "";
+    asciiW = 0;
+  };
+
   while (i < (int)text.length() && line < maxLines) {
     uint32_t cp;
     int n = utf8Next(text, i, cp);
     if (n <= 0) break;
-    if (cp == '\n') { cx = x; cy += lineHeight; line++; i += n; continue; }
-    int w = utf8CharWidth(cp);
-    if (cx + w > x + maxWidth && cx > x) { cx = x; cy += lineHeight; line++; }
-    if (line >= maxLines) break;
+    if (cp == '\n') {
+      flushAscii();
+      cx = x; cy += lineHeight; line++;
+      i += n; continue;
+    }
     if (cp < 0x80) {
-      tft.drawChar(cx, cy, (char)cp, fg, bg, 2);
+      String ch((char)cp);
+      int w = tft.textWidth(ch, 2);
+      if (cx + asciiW + w > x + maxWidth && (cx > x || asciiW > 0)) {
+        flushAscii();
+        cx = x; cy += lineHeight; line++;
+      }
+      if (line >= maxLines) break;
+      asciiRun += ch;
+      asciiW += w;
     } else {
+      flushAscii();
+      if (cx + 16 > x + maxWidth && cx > x) { cx = x; cy += lineHeight; line++; }
+      if (line >= maxLines) break;
       uint8_t glyph[32];
+      tft.startWrite();
       if (getGbGlyph(cp, glyph)) tft.drawBitmap(cx, cy, glyph, 16, 16, fg, bg);
       else tft.drawChar(cx, cy, '?', fg, bg, 2);
+      tft.endWrite();
+      cx += 16;
     }
-    cx += w;
     i += n;
   }
+  flushAscii();
 }
 
 void drawMessage(const String& text) {
