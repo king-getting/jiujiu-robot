@@ -622,7 +622,7 @@ static const uint8_t zh_phrase_19[] PROGMEM = {
 };
 #define ZH_PHRASE_19_W 192
 
-#define ZH_PHRASE_COUNT 20
+#define ZH_PHRASE_COUNT 40
 
 struct ZhPhrase { const uint8_t* data; uint16_t w; const char* text; };
 static const ZhPhrase zh_phrases[ZH_PHRASE_COUNT] = {
@@ -646,6 +646,26 @@ static const ZhPhrase zh_phrases[ZH_PHRASE_COUNT] = {
   { zh_phrase_17, ZH_PHRASE_17_W, "你是被爱着的" },
   { zh_phrase_18, ZH_PHRASE_18_W, "吃顿好的" },
   { zh_phrase_19, ZH_PHRASE_19_W, "你已经做得很好了" },
+  { nullptr, 0, "今天辛苦啦" },
+  { nullptr, 0, "你已经很努力了" },
+  { nullptr, 0, "我会一直陪着你" },
+  { nullptr, 0, "累了就休息一下" },
+  { nullptr, 0, "一切都会好起来" },
+  { nullptr, 0, "你值得被温柔对待" },
+  { nullptr, 0, "做你自己就很好" },
+  { nullptr, 0, "小步走也是前进" },
+  { nullptr, 0, "今天也谢谢你" },
+  { nullptr, 0, "不要忘记微笑" },
+  { nullptr, 0, "呼吸一下，慢慢来" },
+  { nullptr, 0, "你是独一无二的" },
+  { nullptr, 0, "没关系，明天再来" },
+  { nullptr, 0, "我会为你加油" },
+  { nullptr, 0, "You are enough" },
+  { nullptr, 0, "It's okay to rest" },
+  { nullptr, 0, "One step at a time" },
+  { nullptr, 0, "You did well today" },
+  { nullptr, 0, "Be kind to yourself" },
+  { nullptr, 0, "I'm here with you" },
 };
 
 #endif

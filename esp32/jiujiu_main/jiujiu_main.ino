@@ -253,15 +253,24 @@ void drawFace(bool blink) {
 
 void drawZhPhrase(int idx) {
   int n = phraseCount > 0 ? phraseCount : ZH_PHRASE_COUNT;
-  const ZhPhrase* p = &zh_phrases[0];
   String target = phraseTexts[idx % n];
-  for (int i = 0; i < ZH_PHRASE_COUNT; i++) {
-    if (target == String(zh_phrases[i].text)) { p = &zh_phrases[i]; break; }
-  }
-  int x = (320 - p->w) / 2;
   int y = 196;
-  tft.fillRect(0, y, 320, 24, BG_PINK);   // 先擦掉上一句，避免文字重叠
-  tft.drawBitmap(x, y, p->data, p->w, 24, BG_DEEP, BG_PINK);
+  tft.fillRect(0, y, 320, 24, BG_PINK);
+
+  int textW = 0;
+  for (int i = 0; i < (int)target.length();) {
+    uint32_t cp = 0;
+    int len = utf8Next(target, i, cp);
+    if (len <= 0) break;
+    textW += utf8CharWidth(cp);
+    i += len;
+  }
+  if (textW > 300) textW = 300;
+  int x = (320 - textW) / 2;
+
+  tft.setTextDatum(TL_DATUM);
+  tft.setTextColor(BG_DEEP, BG_PINK);
+  drawUtf8Wrapped(target, x, y + 4, 300, 16, BG_DEEP, BG_PINK, 1);
 }
 
 int utf8Next(const String& s, int i, uint32_t& cp) {
