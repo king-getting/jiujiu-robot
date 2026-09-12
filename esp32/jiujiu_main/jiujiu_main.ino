@@ -260,6 +260,7 @@ void drawZhPhrase(int idx) {
   }
   int x = (320 - p->w) / 2;
   int y = 196;
+  tft.fillRect(0, y, 320, 24, BG_PINK);   // 先擦掉上一句，避免文字重叠
   tft.drawBitmap(x, y, p->data, p->w, 24, BG_DEEP, BG_PINK);
 }
 
