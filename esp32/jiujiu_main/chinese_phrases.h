@@ -626,7 +626,7 @@ static const uint8_t zh_phrase_19[] PROGMEM = {
 
 struct ZhPhrase { const uint8_t* data; uint16_t w; const char* text; };
 static const ZhPhrase zh_phrases[ZH_PHRASE_COUNT] = {
-  { zh_phrase_0, ZH_PHRASE_0_W, "我在呢" },
+  { zh_phrase_0, ZH_PHRASE_0_W, "你好，我是啾啾" },
   { zh_phrase_1, ZH_PHRASE_1_W, "加油鸭" },
   { zh_phrase_2, ZH_PHRASE_2_W, "早点休息" },
   { zh_phrase_3, ZH_PHRASE_3_W, "今天也要开心" },
